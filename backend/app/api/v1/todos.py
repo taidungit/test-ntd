@@ -18,12 +18,44 @@ from app.services.todo_service import (
     update_todo,
 )
 
+from datetime import datetime
+from app.schemas.tag import TagBrief
+from app.schemas.tag_attach import AttachTagRequest
+from app.schemas.todo import BulkStatusResponse, BulkStatusUpdate
+from app.services.tag_service import (
+    attach_tag_to_todo,
+    detach_tag_from_todo,
+    get_tag_by_id,
+)
+from app.services.todo_service import bulk_update_status
+
 router = APIRouter()
 
 CACHE_TTL = 300  # 5 minutes
 
-def todos_list_cache_key(user_id: uuid.UUID, page: int, size: int) -> str:
-    return f"todos:list:{user_id}:{page}:{size}"
+def todos_list_cache_key(
+    user_id: uuid.UUID,
+    page: int,
+    size: int,
+    status_filter: str | None = None,
+    tag_id: uuid.UUID | None = None,
+    keyword: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> str:
+    return ":".join(
+        [
+            "todos:list",
+            str(user_id),
+            str(page),
+            str(size),
+            status_filter or "",
+            str(tag_id) if tag_id else "",
+            keyword or "",
+            date_from.isoformat() if date_from else "",
+            date_to.isoformat() if date_to else "",
+        ]
+    )
 
 
 async def invalidate_todo_list_cache(
@@ -45,6 +77,11 @@ def ensure_todo_owner(todo, current_user: User) -> None:
 async def list_todos(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1),
+    status_filter: str | None = Query(None, alias="status"),
+    tag_id: uuid.UUID | None = Query(None),
+    keyword: str | None = Query(None),
+    date_from: datetime | None = Query(None),
+    date_to: datetime | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: RedisClient = Depends(get_redis),
@@ -52,7 +89,16 @@ async def list_todos(
     """Get paginated list of todos."""
     skip = (page - 1) * size
 
-    cache_key = todos_list_cache_key(current_user.id, page, size)
+    cache_key = todos_list_cache_key(
+        current_user.id,
+        page,
+        size,
+        status_filter=status_filter,
+        tag_id=tag_id,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
     # Try to get from cache
     cached = await redis.get(cache_key)
@@ -60,7 +106,12 @@ async def list_todos(
         cached_data = json.loads(cached)
         return TodoListResponse(**cached_data)
 
-    todos, total = await get_todos(db, user_id=current_user.id, skip=skip, limit=size)
+    todos, total = await get_todos(db, user_id=current_user.id, skip=skip, limit=size,
+        status=status_filter,
+        tag_id=tag_id,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to)
 
     items = []
     for todo in todos:
@@ -76,6 +127,7 @@ async def list_todos(
                 created_at=todo.created_at,
                 updated_at=todo.updated_at,
                 user_email=user.email if user else None,
+                tags=[TagBrief.model_validate(t) for t in (todo.tags or [])],
             )
         )
 
@@ -90,6 +142,23 @@ async def list_todos(
     await redis.set(cache_key, response.model_dump_json(), ex=CACHE_TTL)
 
     return response
+
+
+@router.patch("/bulk-status", response_model=BulkStatusResponse)
+async def bulk_status(
+    payload: BulkStatusUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: RedisClient = Depends(get_redis),
+):
+    count = await bulk_update_status(
+        db,
+        user_id=current_user.id,
+        todo_ids=payload.todo_ids,
+        completed=payload.completed,
+    )
+    await invalidate_todo_list_cache(redis, current_user.id)
+    return BulkStatusResponse(updated_count=count)
 
 
 @router.post("", response_model=TodoResponse, status_code=status.HTTP_201_CREATED)
@@ -173,3 +242,50 @@ async def delete_existing_todo(
     await delete_todo(db, todo)
     await invalidate_todo_list_cache(redis, current_user.id)
     return None
+
+
+@router.post("/{todo_id}/tags", response_model=TodoResponse)
+async def attach_tag(
+    todo_id: uuid.UUID,
+    body: AttachTagRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: RedisClient = Depends(get_redis),
+):
+    todo = await get_todo_by_id(db, todo_id)
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    ensure_todo_owner(todo, current_user)
+
+    tag = await get_tag_by_id(db, body.tag_id)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    if tag.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed to use this tag")
+
+    await attach_tag_to_todo(db, todo, tag)
+    todo = await get_todo_by_id(db, todo_id)
+    await invalidate_todo_list_cache(redis, current_user.id)
+    return todo
+
+
+@router.delete("/{todo_id}/tags/{tag_id}", response_model=TodoResponse)
+async def detach_tag(
+    todo_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: RedisClient = Depends(get_redis),
+):
+    todo = await get_todo_by_id(db, todo_id)
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    ensure_todo_owner(todo, current_user)
+
+    removed = await detach_tag_from_todo(db, todo_id, tag_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Tag is not attached to this todo")
+
+    todo = await get_todo_by_id(db, todo_id)
+    await invalidate_todo_list_cache(redis, current_user.id)
+    return todo
