@@ -149,10 +149,20 @@ pytest tests/ -v
 ```
 
 ### Frontend E2E Tests (Playwright)
-Once set up, run your Playwright suite against the running frontend:
+Start the app (Docker or local), then from `e2e/`:
 ```bash
-# In your E2E / frontend directory:
+cd e2e
+npm install
+npx playwright install chromium
+
+# Headless
 npx playwright test
+
+# Headed (watch the browser)
+npx playwright test --headed
+
+# Interactive UI mode
+npx playwright test --ui
 ```
 
 ### Database Performance Benchmarking
