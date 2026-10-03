@@ -98,10 +98,10 @@ async def refresh_token(
 
     user_id = payload.get("sub")
     if user_id is None:
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid refresh token",
-    )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
 
     try:
         user_uuid = uuid.UUID(user_id)
