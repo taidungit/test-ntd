@@ -86,9 +86,11 @@ export function useUpdateTodo() {
     mutationFn: async ({
       id,
       data,
+      silent = false,
     }: {
       id: string;
       data: UpdateTodoRequest;
+      silent?: boolean; // Khai báo type ở đây để TypeScript nhận diện
     }): Promise<Todo> => {
       const response = await api.put(`/todos/${id}`, data);
       return response.data;
@@ -115,12 +117,16 @@ export function useUpdateTodo() {
 
       return { previousEntries };
     },
-    onSuccess: (updatedTodo) => {
+    onSuccess: (updatedTodo, variables) => {
       queryClient.setQueriesData<TodoListResponse>(
         { queryKey: ["todos"] },
         (prev) => mergeTodoIntoList(prev, updatedTodo)
       );
-      toast.success("Todo updated successfully!");
+      
+      // Sử dụng biến silent từ variables đã được TypeScript định nghĩa
+      if (!variables.silent) {
+        toast.success("Todo updated successfully!");
+      }
     },
     onError: (_err, _vars, context) => {
       context?.previousEntries.forEach(([queryKey, data]) => {
@@ -169,6 +175,7 @@ export function useToggleTodo() {
       updateTodo.mutate({
         id: todo.id,
         data: { completed: !todo.completed },
+        silent: true,
       });
     },
   };
