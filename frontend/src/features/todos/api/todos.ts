@@ -31,10 +31,20 @@ interface UpdateTodoRequest {
   completed?: boolean;
 }
 
+function mergeTodoIntoList(
+  prev: TodoListResponse | undefined,
+  updatedTodo: Todo
+): TodoListResponse | undefined {
+  if (!prev) return prev;
+  return {
+    ...prev,
+    items: prev.items.map((t) => (t.id === updatedTodo.id ? updatedTodo : t)),
+  };
+}
 
 export function useTodos(page: number = 1, size: number = 10000) {
   return useQuery({
-    queryKey: ["todos"],
+    queryKey: ["todos", page, size],
     queryFn: async (): Promise<TodoListResponse> => {
       const response = await api.get("/todos", {
         params: { page, size },
@@ -50,8 +60,19 @@ export function useCreateTodo() {
       const response = await api.post("/todos", data);
       return response.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    onSuccess: (newTodo) => {
+      queryClient.setQueriesData<TodoListResponse>(
+        { queryKey: ["todos"] },
+        (prev) =>
+          prev
+            ? {
+                ...prev,
+                items: [newTodo, ...prev.items],
+                total: prev.total + 1,
+              }
+            : { items: [newTodo], total: 1, page: 1, size: 10000 }
+      );
+      void queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo created successfully!");
     },
     onError: () => {
@@ -59,7 +80,6 @@ export function useCreateTodo() {
     },
   });
 }
-
 
 export function useUpdateTodo() {
   return useMutation({
@@ -74,29 +94,42 @@ export function useUpdateTodo() {
       return response.data;
     },
     onMutate: async ({ id, data }) => {
-      // Cancel outgoing queries
       await queryClient.cancelQueries({ queryKey: ["todos"] });
 
-      // Snapshot previous value
-      const previousTodos = queryClient.getQueryData<TodoListResponse>(["todos"]);
+      const previousEntries = queryClient.getQueriesData<TodoListResponse>({
+        queryKey: ["todos"],
+      });
 
-      // Optimistically update
-      if (previousTodos) {
-        queryClient.setQueryData<TodoListResponse>(["todos"], {
-          ...previousTodos,
-          items: previousTodos.items.map((todo) =>
-            todo.id === id ? { ...todo, ...data } : todo
-          ),
-        });
-      }
+      queryClient.setQueriesData<TodoListResponse>(
+        { queryKey: ["todos"] },
+        (prev) =>
+          prev
+            ? {
+                ...prev,
+                items: prev.items.map((todo) =>
+                  todo.id === id ? { ...todo, ...data } : todo
+                ),
+              }
+            : prev
+      );
 
-      return { previousTodos };
+      return { previousEntries };
     },
-    onError: () => {
+    onSuccess: (updatedTodo) => {
+      queryClient.setQueriesData<TodoListResponse>(
+        { queryKey: ["todos"] },
+        (prev) => mergeTodoIntoList(prev, updatedTodo)
+      );
+      toast.success("Todo updated successfully!");
+    },
+    onError: (_err, _vars, context) => {
+      context?.previousEntries.forEach(([queryKey, data]) => {
+        queryClient.setQueryData(queryKey, data);
+      });
       toast.error("Failed to update todo");
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      void queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
   });
 }
@@ -106,8 +139,19 @@ export function useDeleteTodo() {
     mutationFn: async (id: string): Promise<void> => {
       await api.delete(`/todos/${id}`);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    onSuccess: (_data, id) => {
+      queryClient.setQueriesData<TodoListResponse>(
+        { queryKey: ["todos"] },
+        (prev) =>
+          prev
+            ? {
+                ...prev,
+                items: prev.items.filter((t) => t.id !== id),
+                total: Math.max(0, prev.total - 1),
+              }
+            : prev
+      );
+      void queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo deleted successfully!");
     },
     onError: () => {
