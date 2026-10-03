@@ -140,11 +140,12 @@ async def update_existing_todo(
 
     ensure_todo_owner(todo, current_user)
 
-    if todo_data.completed:
-        todo.completed = todo_data.completed
+    update_data = todo_data.model_dump(exclude_unset=True)
 
-    # Apply other updates
-    if update_data.get("title") is not None:
+
+    if "completed" in update_data:
+        todo.completed = update_data["completed"]
+    if "title" in update_data:
         todo.title = update_data["title"]
     if "description" in update_data:
         todo.description = update_data["description"]
