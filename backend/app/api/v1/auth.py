@@ -88,6 +88,13 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
         )
+    # Check if the token has been revoked (logged out)
+    jti = payload.get("jti")
+    if jti and await redis.exists(f"blacklist:{jti}"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked (logged out)",
+        )
 
     user_id = payload.get("sub")
     access_token = create_access_token(data={"sub": user_id})
@@ -101,9 +108,15 @@ async def refresh_token(
 
 @router.post("/logout")
 async def logout(
+    request: RefreshTokenRequest, 
     current_user: User = Depends(get_current_user),
+    redis: RedisClient = Depends(get_redis),
 ):
     """Logout user."""
+    payload = verify_token(request.refresh_token)
+    if payload and payload.get("jti"):
+        jti = payload.get("jti")
+        await redis.set(f"blacklist:{jti}", "revoked", ex=7 * 24 * 3600)
     return {"message": "Successfully logged out"}
 
 
