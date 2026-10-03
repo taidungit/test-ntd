@@ -97,6 +97,26 @@ async def refresh_token(
         )
 
     user_id = payload.get("sub")
+    if user_id is None:
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid refresh token",
+    )
+
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+
+    user = await get_user_by_id(db, user_uuid)
+    if user is None:  # nếu model có cờ is_active thì kiểm tra thêm: or not user.is_active
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
     access_token = create_access_token(data={"sub": user_id})
     refresh_token = create_refresh_token(data={"sub": user_id})
 
