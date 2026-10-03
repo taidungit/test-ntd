@@ -66,12 +66,15 @@ async def test_logout(client: AsyncClient):
         "/api/v1/auth/register",
         json={"email": "logout@example.com", "password": "password123"},
     )
-    token = reg_response.json()["access_token"]
+    reg_data = reg_response.json()
+    token = reg_data["access_token"]
+    refresh_token = reg_data["refresh_token"]
 
     # Logout
     response = await client.post(
         "/api/v1/auth/logout",
         headers={"Authorization": f"Bearer {token}"},
+        json={"refresh_token": refresh_token},
     )
     assert response.status_code == 200
     assert response.json()["message"] == "Successfully logged out"

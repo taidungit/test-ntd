@@ -1,7 +1,7 @@
 import asyncio
+import fnmatch
 import os
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -16,6 +16,32 @@ from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+
+
+class InMemoryRedis:
+    """Minimal async Redis stand-in so cache invalidation can be asserted."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    async def set(self, key: str, value: str, ex: int | None = None) -> None:
+        self.store[key] = value
+
+    async def delete(self, key: str) -> None:
+        self.store.pop(key, None)
+
+    async def delete_by_pattern(self, pattern: str) -> None:
+        for key in [k for k in self.store if fnmatch.fnmatch(k, pattern)]:
+            self.store.pop(key, None)
+
+    def clear(self) -> None:
+        self.store.clear()
+
+
+fake_redis = InMemoryRedis()
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 test_session_maker = async_sessionmaker(
@@ -34,11 +60,13 @@ def event_loop():
 
 @pytest.fixture(autouse=True)
 async def setup_db():
+    fake_redis.clear()
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+    fake_redis.clear()
 
 
 async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -52,11 +80,7 @@ async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 def override_get_redis():
-    mock_redis = MagicMock()
-    mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.set = AsyncMock()
-    mock_redis.delete = AsyncMock()
-    return mock_redis
+    return fake_redis
 
 
 app.dependency_overrides[get_db] = override_get_db
@@ -76,6 +100,11 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async with test_session_maker() as session:
         yield session
+
+
+@pytest.fixture
+def redis_store() -> InMemoryRedis:
+    return fake_redis
 
 
 @pytest.fixture
