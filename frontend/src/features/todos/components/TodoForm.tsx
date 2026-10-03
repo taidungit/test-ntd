@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,15 @@ export function TodoForm({ mode, todo, open, onClose }: TodoFormProps) {
       description: todo?.description || "",
     },
   });
+
+  useEffect(() => {
+    if (open) {
+      reset({
+        title: todo?.title ?? "",
+        description: todo?.description ?? "",
+      });
+    }
+  }, [open, todo, reset]);
 
   const onSubmit = (data: TodoFormData) => {
     if (mode === "create") {
