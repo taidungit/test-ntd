@@ -33,6 +33,13 @@ async def invalidate_todo_list_cache(
     # Legacy global key from earlier versions
     await redis.delete("todos:list")
 
+def ensure_todo_owner(todo, current_user: User) -> None:
+    if todo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to access this todo",
+        )
+        
 
 @router.get("", response_model=TodoListResponse)
 async def list_todos(
@@ -111,7 +118,7 @@ async def get_todo(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Todo not found",
         )
-
+    ensure_todo_owner(todo, current_user)
     return todo
 
 
@@ -131,7 +138,7 @@ async def update_existing_todo(
             detail="Todo not found",
         )
 
-    update_data = todo_data.model_dump()
+    ensure_todo_owner(todo, current_user)
 
     if todo_data.completed:
         todo.completed = todo_data.completed
@@ -161,7 +168,7 @@ async def delete_existing_todo(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Todo not found",
         )
-
+    ensure_todo_owner(todo, current_user)
     await delete_todo(db, todo)
     await invalidate_todo_list_cache(redis, current_user.id)
     return None
