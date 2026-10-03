@@ -1,0 +1,31 @@
+# VCS / editor
+.git
+.gitignore
+.idea
+.vscode
+# Python envs & caches
+venv
+.venv
+env
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.egg-info
+build
+dist
+# Local data & secrets
+test.db
+*.sqlite3
+*.db
+.env
+.env.*
+# Docker / docs / tests
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+*.md
+tests

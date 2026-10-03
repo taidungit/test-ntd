@@ -5,9 +5,10 @@ __pycache__/
 venv/
 .venv/
 
-# Environment
-# .env
-*.env.local
+# Environment 
+.env
+.env.*
+!.env.example
 
 # IDE
 .vscode/
@@ -16,11 +17,16 @@ venv/
 # Build
 dist/
 build/
+*.tsbuildinfo
+.vite/
 
 # Test
 test.db
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
+coverage/
 e2e/test-results/
 e2e/playwright-report/
 e2e/blob-report/
@@ -28,6 +34,7 @@ e2e/playwright/.cache/
 
 # Docker
 postgres_data/
+redis_data/
 
 # Answer key (interviewer only)
 docs/ANSWER_KEY.md
